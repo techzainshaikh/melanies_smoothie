@@ -1,46 +1,56 @@
 # Import python packages
 import streamlit as st
 from snowflake.snowpark.functions import col
+import pandas as pd
+import requests
 
+# Title and description
+st.title("My Parent's New Healthy Dinner")
+st.write("Choose the fruit you want in your custom smoothie!")
 
-
-# Write directly to the app
-st.title("my parent new healthy dinner")
-st.write(
-    """Choose the fruit you want in your custom smoothie!
-    """)
-
-import streamlit as st
-
+# Text input for smoothie name
 name_on_order = st.text_input("Name of Smoothie")
 st.write("The name on your smoothie will be:", name_on_order)
 
-cnx = st.connection("Snowflake")
-session = cnx.session()
-my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'))
-# st.dataframe(data=my_dataframe, use_container_width=True)
+# Snowflake connection
+try:
+    cnx = st.connection("Snowflake")
+    session = cnx.session()
 
-ingredients_list = st.multiselect(
-    'Choose up to 5 ingredients:'
-    ,my_dataframe
-)
-if ingredients_list:
-    # Combine ingredients into a single string
-    ingredients_string = ' '.join(ingredients_list)
+    # Query fruit options
+    snowflake_df = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'))
+    fruit_options = pd.DataFrame(snowflake_df.collect())['FRUIT_NAME'].tolist()
 
-    # Adjust the INSERT statement based on the actual table structure
-    my_insert_stmt = f"""
-        INSERT INTO smoothies.public.orders (ingredients)
-        VALUES ('{ingredients_string}')
-    """
+    # Multiselect for ingredients
+    ingredients_list = st.multiselect(
+        'Choose up to 5 ingredients:',
+        fruit_options
+    )
 
-    # Show the SQL statement for debugging
-    st.write(my_insert_stmt)
-    time_to_insert = st.button("Submit Order")
-    
-    if time_to_insert:
-        session.sql(my_insert_stmt).collect()
-        st.success(f"Your Smoothie '{name_on_order}' is ordered!", icon="✅")
-        import requests
-smoothiefroot_response = requests.get("https://my.smoothiefroot.com/api/fruit/watermelon")
-st.text(smoothiefroot_response)
+    if ingredients_list:
+        # Combine ingredients into a single string
+        ingredients_string = ', '.join(ingredients_list)
+
+        # Parameterized SQL for safety
+        my_insert_stmt = """
+            INSERT INTO smoothies.public.orders (name, ingredients)
+            VALUES (%s, %s)
+        """
+
+        # Show the SQL statement for debugging
+        st.write(f"Your smoothie '{name_on_order}' includes: {ingredients_string}")
+
+        # Button to submit order
+        time_to_insert = st.button("Submit Order")
+        if time_to_insert:
+            session.sql(my_insert_stmt, (name_on_order, ingredients_string)).collect()
+            st.success(f"Your Smoothie '{name_on_order}' is ordered!", icon="✅")
+
+    # Optional: Fetching fruit data from external API
+    smoothiefroot_response = requests.get("https://my.smoothiefroot.com/api/fruit/watermelon")
+    if smoothiefroot_response.status_code == 200:
+        st.write("Fruit API Response:", smoothiefroot_response.json())
+    else:
+        st.error("Failed to fetch data from the fruit API.")
+except Exception as e:
+    st.error(f"An error occurred: {e}")
